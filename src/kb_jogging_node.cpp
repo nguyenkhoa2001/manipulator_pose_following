@@ -3,7 +3,9 @@
 #include <stdlib.h>
 #include <termios.h>
 #include <unistd.h>
-
+#include <tf2/LinearMath/Quaternion.h>
+#include <geometry_msgs/Pose.h>
+#include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Twist.h>
 #include <ros/ros.h>
 
@@ -20,18 +22,15 @@ int main(int argc, char **argv) {
   ros::NodeHandle n;
 
   ros::Publisher cmd_vel_fct_pub =
-      n.advertise<geometry_msgs::Twist>("pose_following/cmd_vel", 1);
+      n.advertise<geometry_msgs::PoseStamped>("pose_following/pose", 1);
 
   // --- Get params from parameter server
-  g_jogging_velocity = 0.1;
-  n.getParam("kb_jogging/jogging_vel", g_jogging_velocity);
+  g_jogging_velocity = 0.001;
 
-  n.getParam("kb_jogging/rate", g_rate_hz);
   ros::Rate loop_rate_hz(g_rate_hz);
-
   const double max_cart_translation_vel = .5;
   double cart_translation_vel = max_cart_translation_vel;
-  n.getParam("kb_jogging/max_trans_vel", cart_translation_vel);
+
   if (cart_translation_vel > max_cart_translation_vel) {
     cart_translation_vel = max_cart_translation_vel;
   }
@@ -61,60 +60,62 @@ int main(int argc, char **argv) {
 
   bool stop = false;
 
+  geometry_msgs::Pose sending_pose;
+  geometry_msgs::PoseStamped pose_ref;
+  sending_pose.position.x = 0.185;
+  sending_pose.position.y = 0.0;
+  sending_pose.position.z = 0.228;
+  sending_pose.orientation.x = 1.0;
+  sending_pose.orientation.y = 0.0;
+  sending_pose.orientation.z = 0.0;
+  sending_pose.orientation.w = 0.0;
+
   system("/bin/stty raw");   // Raw mode (send all keystrokes directly to stdin)
   system("/bin/stty -echo"); // Turn off echo
 
   while (ros::ok() && !stop) {
 
-    geometry_msgs::Twist msg_twist;
-
     char command = getch_async();
     switch (command) {
     case '1':
-      msg_twist.linear.x = g_jogging_velocity * cart_translation_vel;
+      sending_pose.position.x += g_jogging_velocity * cart_translation_vel;
       break;
     case '2':
-      msg_twist.linear.y = g_jogging_velocity * cart_translation_vel;
+      sending_pose.position.y += g_jogging_velocity * cart_translation_vel;
       break;
     case '3':
-      msg_twist.linear.z = g_jogging_velocity * cart_translation_vel;
+      sending_pose.position.z += g_jogging_velocity * cart_translation_vel;
       break;
     case '4':
-      msg_twist.angular.x = g_jogging_velocity * cart_rotation_vel;
       break;
     case '5':
-      msg_twist.angular.y = g_jogging_velocity * cart_rotation_vel;
       break;
     case '6':
-      msg_twist.angular.z = g_jogging_velocity * cart_rotation_vel;
       break;
     case 'q':
-      msg_twist.linear.x = -g_jogging_velocity * cart_translation_vel;
+      sending_pose.position.x -= g_jogging_velocity * cart_translation_vel;
       break;
     case 'w':
-      msg_twist.linear.y = -g_jogging_velocity * cart_translation_vel;
+      sending_pose.position.y -= g_jogging_velocity * cart_translation_vel;
       break;
     case 'e':
-      msg_twist.linear.z = -g_jogging_velocity * cart_translation_vel;
+      sending_pose.position.z -= g_jogging_velocity * cart_translation_vel;
       break;
     case 'r':
-      msg_twist.angular.x = -g_jogging_velocity * cart_rotation_vel;
       break;
     case 't':
-      msg_twist.angular.y = -g_jogging_velocity * cart_rotation_vel;
       break;
     case 'y':
-      msg_twist.angular.z = -g_jogging_velocity * cart_rotation_vel;
       break;
     case '0':
-      g_jogging_velocity += 0.1;
-      if (g_jogging_velocity > 1) {
-        g_jogging_velocity = 1;
+      g_jogging_velocity += 0.001;
+      if (g_jogging_velocity > 0.01) {
+        g_jogging_velocity = 0.01;
       }
       ROS_INFO("Jogging velocity factor: %1.1f\r", g_jogging_velocity);
       break;
     case 'p':
-      g_jogging_velocity -= 0.1;
+      g_jogging_velocity -= 0.001;
       if (g_jogging_velocity < 0) {
         g_jogging_velocity = 0;
       }
@@ -126,8 +127,13 @@ int main(int argc, char **argv) {
     default:
       break;
     }
-
-    cmd_vel_fct_pub.publish(msg_twist);
+    pose_ref.header.stamp = ros::Time::now();
+    pose_ref.header.frame_id = "/imu_angle";
+    pose_ref.pose.orientation = sending_pose.orientation;
+    pose_ref.pose.position.x = sending_pose.position.x;
+    pose_ref.pose.position.y = sending_pose.position.y;
+    pose_ref.pose.position.z = sending_pose.position.z;
+    cmd_vel_fct_pub.publish(pose_ref);
     loop_rate_hz.sleep();
   }
   // use system call to set terminal behaviour to more normal behaviour

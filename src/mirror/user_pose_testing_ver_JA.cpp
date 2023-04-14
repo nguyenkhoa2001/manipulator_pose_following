@@ -29,7 +29,12 @@ ros::Time g_t_start, g_t_last, g_t_last_cb;
 manipulator_pose_following::DeltaPoseRPY g_delta_pose;
 geometry_msgs::PoseStamped g_pose, g_pose_last;
 
-Eigen::MatrixXd p_inverse(Eigen::MatrixXd J) {
+// Additional 2 variable to calculate analytic Jacob
+double g_pose_roll = 0, g_pose_pitch = 0, g_pose_yaw = 0;
+double g_lastpose_roll = 0, g_lastpose_pitch = 0, g_lastpose_yaw = 0;
+
+
+Eigen::MatrixXd calc_p_inverse(Eigen::MatrixXd J) {
   Eigen::MatrixXd I = Eigen::MatrixXd::Identity(6, 6);
   return (J.transpose() * (J * J.transpose()).inverse());
 }
@@ -233,16 +238,16 @@ int main(int argc, char **argv) {
       "/pose_following/stop", cb_stop_pose_following);
 
   // --- Obtain parameters
-  int rate_hz = 100;
+  int rate_hz = 30;
   nh_pose_following.getParam("pose_following/rate", rate_hz);
   ros::Rate loop_rate(rate_hz);
 
-  std::string group_st = "manipulator";
+  std::string group_st = "arm";
   nh_pose_following.getParam("pose_following/group", group_st);
 
   double w0 = 0.1;
   nh_pose_following.getParam("pose_following/w0", w0);
-  double k0 = 0.001;
+  double k0 = 0.001; //modifiable
   nh_pose_following.getParam("pose_following/k0", k0);
 
   double theta_d_limit = 3.14;
@@ -254,8 +259,8 @@ int main(int argc, char **argv) {
   // --- Setup MoveIt interface
   moveit::planning_interface::MoveGroupInterface arm(group_st);
 
-  Eigen::MatrixXd J(6, 7);
-  Eigen::VectorXd theta_d(7), cart_vel(6);
+  Eigen::MatrixXd J(6, 6);
+  Eigen::VectorXd theta_d(6), cart_vel(6);
   Eigen::Vector3d ref_point(0.0, 0.0, 0.0);
 
   cart_vel.setZero();
@@ -280,15 +285,17 @@ int main(int argc, char **argv) {
       joint_model_group_p->getJointModelNames();
   std::vector<double> joint_values;
   kinematic_state.copyJointGroupPositions(joint_model_group_p, joint_values);
+
   ros::topic::waitForMessage<sensor_msgs::JointState>("joint_states");
-  ROS_DEBUG("joint_names: [%s %s %s %s %s %s %s]", joint_names[0].c_str(),
+  ROS_DEBUG("joint_names: [%s %s %s %s %s %s]", joint_names[0].c_str(),
             joint_names[1].c_str(), joint_names[2].c_str(),
             joint_names[3].c_str(), joint_names[4].c_str(),
-            joint_names[5].c_str(), joint_names[6].c_str());
-  ROS_DEBUG("joint_values: [%1.2f %1.2f %1.2f %1.2f %1.2f %1.2f %1.2f]",
+            joint_names[5].c_str());
+
+  ROS_DEBUG("joint_values: [%1.2f %1.2f %1.2f %1.2f %1.2f %1.2f]",
             joint_values[0], joint_values[1], joint_values[2], joint_values[3],
-            joint_values[4], joint_values[5], joint_values[6]);
-  Eigen::Isometry3d frame_tf = kinematic_state.getFrameTransform("link_t");
+            joint_values[4], joint_values[5]);
+  Eigen::Isometry3d frame_tf = kinematic_state.getFrameTransform("link_6_t");
   std::ostream stream(nullptr);
   std::stringbuf str;
   stream.rdbuf(&str);
@@ -305,7 +312,7 @@ int main(int argc, char **argv) {
   trajectory_msgs::JointTrajectory dummy_traj;
   dummy_traj.joint_names = g_current_joints.name;
   trajectory_msgs::JointTrajectoryPoint point;
-  for (unsigned int joint = 0; joint < 7; joint++) {
+  for (unsigned int joint = 0; joint < 6; joint++) {
     point.positions.push_back(g_current_joints.position.at(joint));
     point.velocities.push_back(0);
   }
@@ -320,7 +327,7 @@ int main(int argc, char **argv) {
     case STATE_IDLE: // IDLE
 
       // --- Keep track of the joint state (positions)
-      for (unsigned int joint = 0; joint < 7; joint++) {
+      for (unsigned int joint = 0; joint < 6; joint++) {
         point.positions.at(joint) = g_current_joints.position.at(joint);
         point.velocities.at(joint) = 0;
       }
@@ -330,7 +337,7 @@ int main(int argc, char **argv) {
     case STATE_STOP: // STOP
 
       // --- Keep track of the joint state (positions)
-      for (unsigned int joint = 0; joint < 7; joint++) {
+      for (unsigned int joint = 0; joint < 6; joint++) {
         point.positions.at(joint) = g_current_joints.position.at(joint);
         point.velocities.at(joint) = 0;
       }
@@ -354,12 +361,14 @@ int main(int argc, char **argv) {
         cart_vel[i] = g_delta_pose.data[i];
       }
 
-      Eigen::Isometry3d frame_tf = kinematic_state.getFrameTransform("link_t");
+      Eigen::Isometry3d frame_tf = kinematic_state.getFrameTransform("link_6_t");
+
       std::ostream stream(nullptr);
       std::stringbuf str;
       stream.rdbuf(&str);
       kinematic_state.printTransform(frame_tf, stream);
       ROS_DEBUG_STREAM_NAMED("stream_pose", "EEF-pose: " << str.str());
+      ROS_INFO_STREAM("framtf: " << str.str());
  
       // Time since last point:
       // ros::topic::waitForMessage<sensor_msgs::JointState>("joint_states");
@@ -376,15 +385,36 @@ int main(int argc, char **argv) {
               joint_model_group_p->getLinkModelNames().back()),
           ref_point, J);
 
-      w = pow((J * J.transpose()).determinant(), 0.5);
-      Eigen::MatrixXd sr_inv_J = calc_sr_inverse(J, w, w0, k0);
+      //Trich xuat roll, pitch, yaw va tinh Ja
+      tf::Quaternion q_now(g_pose.pose.orientation.x,g_pose.pose.orientation.y,g_pose.pose.orientation.z,g_pose.pose.orientation.w);
+      tf::Quaternion q_last(g_pose_last.pose.orientation.x,g_pose_last.pose.orientation.y,g_pose_last.pose.orientation.z,g_pose_last.pose.orientation.w);
+        //convert quat to rotation matrix
+      tf::Matrix3x3 rotate_matrix(q_now);
+      tf::Matrix3x3 rotate_matrix_last(q_last);
+      rotate_matrix.getRPY(g_pose_roll,g_pose_pitch,g_pose_yaw);
+      rotate_matrix_last.getRPY(g_lastpose_roll,g_lastpose_pitch,g_lastpose_yaw);
+
+      //Tinh ma tran Ta theo goc xoay ZYX
+      Eigen::Matrix3d Ta;
+      Ta << 0, cos(g_pose_yaw), cos(g_pose_pitch) * cos(g_pose_yaw),
+            0, -sin(g_pose_yaw), sin(g_pose_yaw),
+            1, 0              , -sin(g_pose_pitch) * cos(g_pose_yaw);
+      
+      Eigen::Matrix3d Zero3x3 = Eigen::Matrix3d::Zero();
+      Eigen::Matrix3d Identi3x3 = Eigen::Matrix3d::Identity();
+      Eigen::MatrixXd Ja(6,6),Ta_represent(6,6);
+      Ta_represent << Identi3x3, Zero3x3, Zero3x3, Ta;
+      Ja = Ta_represent.inverse() * J;
+
+      w = pow((Ja * Ja.transpose()).determinant(), 0.5);
+      Eigen::MatrixXd sr_inv_J = calc_sr_inverse(Ja, w, w0, k0);
       theta_d = sr_inv_J * cart_vel;
-      ROS_DEBUG_STREAM_ONCE("J: \n" << J);
+      ROS_DEBUG_STREAM_ONCE("J: \n" << Ja);
       ROS_DEBUG_STREAM_NAMED("stream_theta_d", "theta_d: \n" << theta_d);
 
       // check condition number:
-      J_cond = J.norm() * p_inverse(J).norm();
-      J_cond_nakamura = J.norm() * sr_inv_J.norm();
+      J_cond = Ja.norm() * calc_p_inverse(Ja).norm();
+      J_cond_nakamura = Ja.norm() * sr_inv_J.norm();
       if (w <= w0) {
         ROS_WARN_NAMED("stream_J_cnd", "Close to singularity (w = %1.6f).", w);
       }
@@ -392,7 +422,7 @@ int main(int argc, char **argv) {
       ROS_DEBUG_NAMED("stream_J_cnd", "Jacobian condition: %e",
                       J_cond_nakamura); 
 
-      for (unsigned int j = 0; j < 7; j++) {
+      for (unsigned int j = 0; j < 6; j++) {
         if (fabs(theta_d[j]) > theta_d_limit) {
           ROS_WARN("Angular velocity of joint %d exceeding %2.2f rad/s.", j,
                    theta_d_limit);

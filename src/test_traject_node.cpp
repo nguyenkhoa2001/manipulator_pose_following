@@ -18,26 +18,25 @@ int main(int argc, char **argv) {
       "pose_following/pose", 1);
 
   // --- Obtain parameters ---
-  int rate_hz = 100;
+  int rate_hz = 30;
   node_handle.getParam("test_traject/rate", rate_hz);
   ros::Rate loop_rate(rate_hz);
-
+  
   geometry_msgs::Pose pose_init;
-  pose_init.position.x = 0.489;
-  pose_init.position.y = 0;
-  pose_init.position.z = 0.64;
-  pose_init.orientation.x = 0;
-  pose_init.orientation.y = 0;
-  pose_init.orientation.z = 0;
-  pose_init.orientation.w = 1;
-
+  pose_init.position.x = 0.185015;
+  pose_init.position.y = 0.0;
+  pose_init.position.z = 0.228008;
+  pose_init.orientation.x = 0.881357;
+  pose_init.orientation.y = -0.374712;
+  pose_init.orientation.z = 0.264724;
+  pose_init.orientation.w = 0.112795;
   ros::Time t_init = ros::Time::now();
   double a = 0.25;
   double a_ref[2] = {0, 0};
   double v_ref[2] = {0, 0};
   double pos_ref[2] = {0, 0};
   double t_period = 7;
-  double amp = 0.05;
+  double amp = 0.15;
   int traj = TRAJ_1;
   double dt = 0;
   double t_last_d = 0;
@@ -49,8 +48,9 @@ int main(int argc, char **argv) {
 
     switch (traj) {
     case TRAJ_1:
-      pos_ref[0] = amp * cos(2 * M_PI * t_now_d / t_period) - amp;
-      pos_ref[1] = amp * sin(2 * M_PI * t_now_d / t_period);
+      //pos_ref[0] = amp * cos(2 * M_PI * t_now_d / t_period) -amp;
+      //pos_ref[1] = amp * sin(2 * M_PI * t_now_d / t_period);
+      //pos_ref[1] += amp * sin(2 * M_PI * t_now_d / t_period);
       break;
     case TRAJ_2:
       if (t_now_d < 1) {
@@ -80,8 +80,8 @@ int main(int argc, char **argv) {
     pose_ref.header.frame_id = "/base";
     pose_ref.pose.orientation = pose_init.orientation;
     pose_ref.pose.position.x = pose_init.position.x;
-    pose_ref.pose.position.y = pose_init.position.y + pos_ref[0];
-    pose_ref.pose.position.z = pose_init.position.z + pos_ref[1];
+    pose_ref.pose.position.y = pose_init.position.y;
+    pose_ref.pose.position.z = pose_init.position.z;
 
     pub_pose.publish(pose_ref);
 

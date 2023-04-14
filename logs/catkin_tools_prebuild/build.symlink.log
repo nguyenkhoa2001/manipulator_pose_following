@@ -1,0 +1,12 @@
+Symlinking /home/khoa/catkin_ws/src/manipulator_pose_following/devel/./env.sh
+Symlinking /home/khoa/catkin_ws/src/manipulator_pose_following/devel/./local_setup.bash
+Symlinking /home/khoa/catkin_ws/src/manipulator_pose_following/devel/./cmake.lock
+Symlinking /home/khoa/catkin_ws/src/manipulator_pose_following/devel/./setup.zsh
+Symlinking /home/khoa/catkin_ws/src/manipulator_pose_following/devel/./local_setup.zsh
+Symlinking /home/khoa/catkin_ws/src/manipulator_pose_following/devel/./setup.sh
+Symlinking /home/khoa/catkin_ws/src/manipulator_pose_following/devel/./local_setup.sh
+Symlinking /home/khoa/catkin_ws/src/manipulator_pose_following/devel/./setup.bash
+Symlinking /home/khoa/catkin_ws/src/manipulator_pose_following/devel/./_setup_util.py
+Symlinking /home/khoa/catkin_ws/src/manipulator_pose_following/devel/lib/pkgconfig/catkin_tools_prebuild.pc
+Symlinking /home/khoa/catkin_ws/src/manipulator_pose_following/devel/share/catkin_tools_prebuild/cmake/catkin_tools_prebuildConfig-version.cmake
+Symlinking /home/khoa/catkin_ws/src/manipulator_pose_following/devel/share/catkin_tools_prebuild/cmake/catkin_tools_prebuildConfig.cmake

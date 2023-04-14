@@ -112,20 +112,20 @@ generate_messages(
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 #  INCLUDE_DIRS include
-#  LIBRARIES manipulator_pose_following
+  LIBRARIES manipulator_pose_following
   CATKIN_DEPENDS
     roscpp
     moveit_core
     moveit_ros_planning_interface
     moveit_ros_manipulation
-    DEPENDS Eigen
+  DEPENDS Eigen
 )
 
 ###########
 ## Build ##
 ###########
 
-## Specify additional locations of header files
+## Specify additional locations of header filesmanipulator_pose_following
 ## Your package locations should be listed before other locations
 include_directories(
 # include
@@ -152,6 +152,10 @@ add_executable(pose_following src/pose_following_node.cpp)
 add_executable(smooth_jogging src/smooth_jogging_node.cpp)
 add_executable(kb_jogging src/kb_jogging_node.cpp)
 
+add_executable(test_keyboard_node src/test_keyboard.cpp)
+add_executable(test_send_command_node src/test_send_command.cpp)
+add_executable(user_pose_testing_node src/user_pose_testing.cpp)
+add_executable(check_kinematic_node src/check_kinematic_node.cpp)
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
 ## target back to the shorter version for ease of user use
@@ -181,6 +185,18 @@ target_link_libraries(kb_jogging
   ncurses
 )
 
+target_link_libraries(test_keyboard_node
+  ${catkin_LIBRARIES}
+)
+target_link_libraries(test_send_command_node
+  ${catkin_LIBRARIES}
+)
+target_link_libraries(user_pose_testing_node
+  ${catkin_LIBRARIES}
+)
+target_link_libraries(check_kinematic_node
+  ${catkin_LIBRARIES}
+)
 #############
 ## Install ##
 #############
