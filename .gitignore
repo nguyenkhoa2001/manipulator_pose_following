@@ -1,2 +1,10 @@
+
+
+# vscode user config file #
+######################
+/.vscode
+
+# Logs and databases #
+######################
 /logs
 .log
