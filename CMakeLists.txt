@@ -3,7 +3,6 @@ project(manipulator_pose_following)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++11)
-
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
@@ -56,11 +55,13 @@ find_package (Eigen REQUIRED)
 add_message_files(
  FILES
  DeltaPoseRPY.msg
+ PlannedPath.msg
 )
 
 ## Generate services in the 'srv' folder
-add_service_files(
+add_service_files(DIRECTORY srv
   FILES
+  InitPoint.srv
   MoveHome.srv
   MoveToRPY.srv
   MoveToQuat.srv
@@ -111,13 +112,14 @@ generate_messages(
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-  LIBRARIES manipulator_pose_following
+  #INCLUDE_DIRS include
+  #LIBRARIES manipulator_pose_following
   CATKIN_DEPENDS
     roscpp
     moveit_core
     moveit_ros_planning_interface
     moveit_ros_manipulation
+    message_runtime
   DEPENDS Eigen
 )
 
@@ -128,7 +130,7 @@ catkin_package(
 ## Specify additional locations of header filesmanipulator_pose_following
 ## Your package locations should be listed before other locations
 include_directories(
-# include
+  include
   ${catkin_INCLUDE_DIRS}
   ${Eigen_INCLUDE_DIRS}
 )
@@ -153,9 +155,11 @@ add_executable(smooth_jogging src/smooth_jogging_node.cpp)
 add_executable(kb_jogging src/kb_jogging_node.cpp)
 
 add_executable(test_keyboard_node src/test_keyboard.cpp)
-add_executable(test_send_command_node src/test_send_command.cpp)
+add_executable(test_service src/test_service.cpp)
 add_executable(user_pose_testing_node src/user_pose_testing.cpp)
 add_executable(check_kinematic_node src/check_kinematic_node.cpp)
+add_executable(point_traj_following src/point_traj_following.cpp)
+add_executable(read_planned_file src/read_file)
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
 ## target back to the shorter version for ease of user use
@@ -164,8 +168,10 @@ add_executable(check_kinematic_node src/check_kinematic_node.cpp)
 
 ## Add cmake target dependencies of the executable
 ## same as for the library above
-# add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
+add_dependencies(user_pose_testing_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(point_traj_following ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(read_planned_file ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(test_service ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 ## Specify libraries to link a library or executable target against
 target_link_libraries(test_traject
   ${catkin_LIBRARIES}
@@ -188,13 +194,19 @@ target_link_libraries(kb_jogging
 target_link_libraries(test_keyboard_node
   ${catkin_LIBRARIES}
 )
-target_link_libraries(test_send_command_node
+target_link_libraries(test_service
   ${catkin_LIBRARIES}
 )
 target_link_libraries(user_pose_testing_node
   ${catkin_LIBRARIES}
 )
+target_link_libraries(point_traj_following
+  ${catkin_LIBRARIES}
+)
 target_link_libraries(check_kinematic_node
+  ${catkin_LIBRARIES}
+)
+target_link_libraries(read_planned_file
   ${catkin_LIBRARIES}
 )
 #############

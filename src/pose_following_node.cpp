@@ -237,7 +237,7 @@ int main(int argc, char **argv) {
   nh_pose_following.getParam("pose_following/rate", rate_hz);
   ros::Rate loop_rate(rate_hz);
 
-  std::string group_st = "manipulator";
+  std::string group_st = "arm";
   nh_pose_following.getParam("pose_following/group", group_st);
 
   double w0 = 0.1;
@@ -254,8 +254,8 @@ int main(int argc, char **argv) {
   // --- Setup MoveIt interface
   moveit::planning_interface::MoveGroupInterface arm(group_st);
 
-  Eigen::MatrixXd J(6, 7);
-  Eigen::VectorXd theta_d(7), cart_vel(6);
+  Eigen::MatrixXd J(6, 6);
+  Eigen::VectorXd theta_d(6), cart_vel(6);
   Eigen::Vector3d ref_point(0.0, 0.0, 0.0);
 
   cart_vel.setZero();
@@ -305,7 +305,7 @@ int main(int argc, char **argv) {
   trajectory_msgs::JointTrajectory dummy_traj;
   dummy_traj.joint_names = g_current_joints.name;
   trajectory_msgs::JointTrajectoryPoint point;
-  for (unsigned int joint = 0; joint < 7; joint++) {
+  for (unsigned int joint = 0; joint < 6; joint++) {
     point.positions.push_back(g_current_joints.position.at(joint));
     point.velocities.push_back(0);
   }
@@ -320,7 +320,7 @@ int main(int argc, char **argv) {
     case STATE_IDLE: // IDLE
 
       // --- Keep track of the joint state (positions)
-      for (unsigned int joint = 0; joint < 7; joint++) {
+      for (unsigned int joint = 0; joint < 6; joint++) {
         point.positions.at(joint) = g_current_joints.position.at(joint);
         point.velocities.at(joint) = 0;
       }
@@ -330,7 +330,7 @@ int main(int argc, char **argv) {
     case STATE_STOP: // STOP
 
       // --- Keep track of the joint state (positions)
-      for (unsigned int joint = 0; joint < 7; joint++) {
+      for (unsigned int joint = 0; joint < 6; joint++) {
         point.positions.at(joint) = g_current_joints.position.at(joint);
         point.velocities.at(joint) = 0;
       }
@@ -392,7 +392,7 @@ int main(int argc, char **argv) {
       ROS_DEBUG_NAMED("stream_J_cnd", "Jacobian condition: %e",
                       J_cond_nakamura); 
 
-      for (unsigned int j = 0; j < 7; j++) {
+      for (unsigned int j = 0; j < 6; j++) {
         if (fabs(theta_d[j]) > theta_d_limit) {
           ROS_WARN("Angular velocity of joint %d exceeding %2.2f rad/s.", j,
                    theta_d_limit);

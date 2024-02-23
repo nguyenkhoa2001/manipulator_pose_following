@@ -1,11 +1,11 @@
 /*
-* NODE's PACKAGE: manipulator_pose_following
-* NODE EXE NAME:  user_pose_testing_node
-* NODE INIT NAME: pose_following
+* NODE's PACKAGE: point_traj_following
+* NODE EXE NAME:  point_traj_following
+* NODE INIT NAME: point_traj_following
 * Subcribe topic: 
 * NODE function: 
 */
-#define NODE_RATE 100
+#define NODE_RATE 50
 
 /* --- INCLUDE BEGIN --- */ 
 //Bare Cpp and OS include
@@ -31,6 +31,8 @@
 //User-define message for service
 #include <manipulator_pose_following/DeltaPoseRPY.h>
 #include <manipulator_pose_following/ReplyInt.h>
+#include <manipulator_pose_following/InitPoint.h>
+#include "manipulator_pose_following/PlannedPath.h"
 /* --- INCLUDE END --- */ 
 
 /* --- BEGIN ROBOT HARDWARE LIMITATION DEFINE --- */
@@ -81,12 +83,16 @@
 const int STATE_IDLE = 0;
 const int STATE_POSE_FOLLOW = 1;
 const int STATE_STOP = 2;
+const int STATE_INIT = 3;
+
+bool g_is_init_done = false;
 
 int g_state = STATE_IDLE;
 int g_last_state = g_state;
 sensor_msgs::JointState g_current_joints;
 ros::Time g_t_start, g_t_last, g_t_last_cb;
 geometry_msgs::PoseStamped g_pose, g_pose_last;
+geometry_msgs::PoseStamped g_pose_init;
 
 Eigen::Matrix3d K_p = Eigen::Matrix3d::Identity();
 Eigen::Matrix3d K_o = Eigen::Matrix3d::Identity();
@@ -108,19 +114,22 @@ Eigen::MatrixXd calc_sr_inverse(Eigen::MatrixXd J, double w, double w0, double k
 void cb_joint_state(sensor_msgs::JointState msg);
 bool cb_start_pose_following(manipulator_pose_following::ReplyInt::Request &req, manipulator_pose_following::ReplyInt::Response &res);
 bool cb_stop_pose_following(manipulator_pose_following::ReplyInt::Request &req, manipulator_pose_following::ReplyInt::Response &res);
+bool cb_init_point_accept(manipulator_pose_following::InitPoint::Request &req, manipulator_pose_following::InitPoint::Response &res);
 
 manipulator_pose_following::DeltaPoseRPY calc_dpose(geometry_msgs::PoseStamped pose);
-void cb_pose_quat(const geometry_msgs::PoseStamped::ConstPtr &msg);
+void cb_pose_quat(const manipulator_pose_following::PlannedPath::ConstPtr &msg);
 
 bool uCheck_JointsLimit(trajectory_msgs::JointTrajectoryPoint &point);
 bool uCheck_JointsVelocityLimit(Eigen::VectorXd &delta_theta);
 void uModify_JacobianParameter(float &Kp, float &Ko, double &w0, double &k0, float &Kdp, float &Kdo);
+void handleIdleState(trajectory_msgs::JointTrajectoryPoint &point);
+void doInitSteps();
 /* --- END FUNCTION PROTOTYPE --- */
 
 int main(int argc, char **argv) {
 
   // --- Initializations
-  ros::init(argc, argv, "pose_following");
+  ros::init(argc, argv, "point_trajectory_following");
 
   // --- Setup node handles for
   //     - pose_following callbacks
@@ -152,7 +161,7 @@ int main(int argc, char **argv) {
 
   // --- Setup topic subscriptions
   ros::Subscriber sub_pose = nh_pose_quat.subscribe(
-      "pose_following/pose", 1, cb_pose_quat);
+      "/user_defined/desired_path_point", 1, cb_pose_quat);
   ros::Subscriber sub_joint = nh_pose_following.subscribe(
       "joint_states", 1, cb_joint_state);
 
@@ -161,6 +170,8 @@ int main(int argc, char **argv) {
   //     - stop: Changes state to STATE_IDLE
   ros::ServiceServer srv_start = nh_startstop.advertiseService(
       "/pose_following/start", cb_start_pose_following);
+  ros::ServiceServer srv_init = nh_startstop.advertiseService(
+      "/pose_following/init_point", cb_init_point_accept);
   ros::ServiceServer srv_stop = nh_pose_following.advertiseService(
       "/pose_following/stop", cb_stop_pose_following);
 
@@ -180,11 +191,18 @@ int main(int argc, char **argv) {
   double theta_d_limit = 3.14;
   nh_pose_following.getParam("pose_following/theta_d_lim", theta_d_limit);
 
-  double dt_pose_lim = 0.5;
+  double dt_pose_lim = 3.0;
   nh_pose_following.getParam("pose_following/dt_pose_lim", dt_pose_lim);
 
   uModify_JacobianParameter(Kp_max, Ko_max, w0, k0, Kdp, Kdo);
-  std::cout << "---------\n" << "Kp_max = " << Kp_max << "\nKo_max = " << Ko_max << "\nw0 = " << w0 << "\nk0 = " << k0 << "\nKdp = " << Kdp <<  "\nKdo = " << Kdo << "\n---------" << std::endl; 
+  std::cout << "---------\n" 
+            << "Kp_max = " << Kp_max 
+            << "\nKo_max = " << Ko_max 
+            << "\nw0 = " << w0 
+            << "\nk0 = " << k0 
+            << "\nKdp = " << Kdp 
+            <<  "\nKdo = " << Kdo 
+            << "\n---------" << std::endl; 
 
   // --- Setup MoveIt interface
   moveit::planning_interface::MoveGroupInterface arm(group_st);
@@ -238,7 +256,7 @@ int main(int argc, char **argv) {
     // init state so it will have t = 0
     point.time_from_start = ros::Duration(0.0);
     dummy_traj.points.push_back(point);
-    streaming_pub.publish(dummy_traj);
+    // streaming_pub.publish(dummy_traj);
     // after already config, set the last_time to thís state of time
     g_t_last = ros::Time::now();
     g_t_start = ros::Time::now();
@@ -252,23 +270,153 @@ int main(int argc, char **argv) {
     switch (g_state) {
 
     case STATE_IDLE: // IDLE
-      //std::cout << "Inside state idle" << std::endl;
-      if (g_last_state != g_state)
-      {
-        g_last_state = g_state; // update last state = this state if spot the diff
-        std::cout << "Falling into idle state" << std::endl;
-      } 
-      // --- Keep track of the joint state (positions)
-      for (unsigned int joint = 0; joint < NUMBER_OF_JOINT; joint++) {
-        point.positions.at(joint) = g_current_joints.position.at(joint);
-        point.velocities.at(joint) = 0;
-      }
-      point.time_from_start = ros::Duration(0.0);
-      
+      handleIdleState(point);
       break;
 
+    case STATE_INIT:
+    {
+    if (g_last_state != g_state)
+      {
+        Kp_elastic = 0.0;
+        Ko_elastic = 0.0;
+        std::cout << "STATE change to INIT, start to send first zero velocity" << std::endl;
+        for (unsigned int joint = 0; joint < NUMBER_OF_JOINT; joint++) {
+        point.positions.at(joint) = g_current_joints.position.at(joint);
+        point.velocities.at(joint) = 0;
+        } 
+        point.time_from_start = ros::Duration(0.0);
+        dummy_traj.points.at(0) = point;
+        dummy_traj.header.stamp = ros::Time::now();
+        streaming_pub.publish(dummy_traj);
+
+        g_t_last = ros::Time::now();
+        g_last_state = g_state;
+        continue;
+      }
+      // Time since last point:
+      // ros::topic::waitForMessage<sensor_msgs::JointState>("joint_states");
+      dt = (ros::Time::now() - g_t_last).toSec();
+      g_t_last = ros::Time::now();
+      kinematic_state.setVariableValues(g_current_joints);
+      std::cout << "[DEBUG][INIT] joint state update:" << g_current_joints.position[0] << ";"
+                                                       << g_current_joints.position[1] << ";"
+                                                       << g_current_joints.position[2] << ";"
+                                                       << g_current_joints.position[3] << ";"
+                                                       << g_current_joints.position[4] << ";"
+                                                       << g_current_joints.position[5] << ";"
+                                                       << std::endl;
+      
+      Eigen::Affine3d end_effector_state = kinematic_state.getGlobalLinkTransform("tool0");
+      Eigen::Matrix4d homo_mat = end_effector_state.matrix();
+      
+      // Get the Jacobian
+      kinematic_state.getJacobian(
+          joint_model_group_p,
+          kinematic_state.getLinkModel(
+              joint_model_group_p->getLinkModelNames().back()),
+          ref_point, J);
+      
+      //e_p = p_destination - p_end_effector
+      e_p(0,0) = g_pose_init.pose.position.x - homo_mat(0,3);
+      e_p(1,0) = g_pose_init.pose.position.y - homo_mat(1,3);
+      e_p(2,0) = g_pose_init.pose.position.z - homo_mat(2,3);
+      std::cout << "[DEBUG][INIT] error in position: e_x=" <<  e_p(0,0) << " e_y=" << e_p(1,0) << " e_z=" << e_p(2,0) << std::endl;
+      Eigen::Matrix3d endEffect_rotateMat = homo_mat.block<3,3>(0,0);
+
+      //Check error < 0.5mm = 0.0005m
+      const double position_error_up_limit = 0.0005;
+      if(e_p(0,0) < position_error_up_limit &&
+         e_p(1,0) < position_error_up_limit &&
+         e_p(2,0) < position_error_up_limit)
+      {
+        std::cout << "Done go to init point" << std::endl;
+        g_is_init_done = true;
+        g_state = STATE_POSE_FOLLOW;
+        continue;
+      }
+
+      auto roll_d = 179.0;
+      auto pitch_d = 0.1;
+      auto yaw_d = 0.1;
+      //qxd qyd qzd giờ đây đã không còn là quaternion mà đang dùng dưới danh nghĩa roll-pitch-yaw
+      Eigen::Matrix3d des_rotateMat;
+      des_rotateMat = Eigen::AngleAxisd((roll_d) * M_PI / 180, Eigen::Vector3d::UnitX())
+      * Eigen::AngleAxisd((pitch_d) * M_PI / 180,  Eigen::Vector3d::UnitY())
+      * Eigen::AngleAxisd(yaw_d * M_PI / 180, Eigen::Vector3d::UnitZ());
+      
+      Eigen::Matrix3d error_rotateMat = des_rotateMat * endEffect_rotateMat.transpose();
+      //tính θ xoay quanh r
+      double angle_rotate_error = acos(0.5*(error_rotateMat(0,0) + error_rotateMat(1,1) + error_rotateMat(2,2) -1));
+      //tinh 3 vector don vi rx ry rz
+      double r_unitx = (error_rotateMat(2,1) - error_rotateMat(1,2))/(2*sin(angle_rotate_error));
+      double r_unity = (error_rotateMat(0,2) - error_rotateMat(2,0))/(2*sin(angle_rotate_error));
+      double r_unitz = (error_rotateMat(1,0) - error_rotateMat(0,1))/(2*sin(angle_rotate_error));
+      
+      //Tính error
+      e_o(0,0) = angle_rotate_error*r_unitx;
+      e_o(1,0) = angle_rotate_error*r_unity;
+      e_o(2,0) = angle_rotate_error*r_unitz;
+
+      if(Kp_elastic < Kp_max)
+      {
+        // MAX / (second*NodeRate)
+        Kp_elastic += Kp_max / (10 * NODE_RATE);
+      }
+      if(Ko_elastic < Ko_max)
+      {
+        // MAX / (second*NodeRate)
+        Ko_elastic += Ko_max / (10 * NODE_RATE);
+      }
+      //p_and_o_quat_vel << Kp_elastic * K_p * e_p ,  Ko_elastic * K_o * e_o;
+      p_and_o_quat_vel << Kp_elastic * K_p * e_p + Kdp * (e_p - e_p_last) ,  Ko_elastic * K_o * e_o + Kdo * (e_o - e_o_last);
+      e_p_last = e_p;
+      e_o_last = e_o;
+      //theta_d = J.inverse() * (p_and_o_quat_vel);
+
+      w = pow((J * J.transpose()).determinant(), 0.5);
+      Eigen::MatrixXd sr_inv_J = calc_sr_inverse(J, w, w0, k0);
+      theta_d = sr_inv_J  * (p_and_o_quat_vel);
+      //theta_d = calc_p_inverse(J)  * (p_and_o_quat_vel);
+
+      // check condition number:
+      J_cond = J.norm() * calc_p_inverse(J).norm();
+      J_cond_nakamura = J.norm() * sr_inv_J.norm();
+      if (w <= w0) {
+        //ROS_WARN_NAMED("stream_J_cnd", "Close to singularity (w = %1.6f).", w);
+      }
+
+      // Check if joints velocities exceed velocity limit for each joint
+      if (uCheck_JointsVelocityLimit(theta_d) != true)
+      {
+          ROS_WARN("Angular velocity exceed vel limit");
+          ROS_WARN("Changing state to STATE_STOP.");
+          g_state = STATE_STOP;
+          continue; // not calculate and block sending new joint command when fall to this condition
+      }
+      
+      for (unsigned int j = 0; j < NUMBER_OF_JOINT; j++) {
+        point.positions.at(j) = point.positions.at(j) + theta_d[j] * dt;
+        point.velocities.at(j) = theta_d[j];
+      }
+      //Check if joint variables (with safe padding ) exceed Joint Limit
+      if (uCheck_JointsLimit(point) != true)
+      {
+        point = last_point;
+        for (unsigned int j = 0; j < NUMBER_OF_JOINT; j++)
+        {
+          point.velocities.at(j) = 0;
+        }
+      }
+      point.time_from_start = ros::Time::now() - g_t_start;
+      std::cout << "[INIT_POINT] time_from_start: " << point.time_from_start << std::endl;
+      dummy_traj.points.at(0) = point;
+      dummy_traj.header.stamp = ros::Time::now();
+      last_point = point;
+      streaming_pub.publish(dummy_traj);
+      break;
+    } //END STATE_INIT
+
     case STATE_STOP: // STOP
-      //std::cout << "Inside state stop" << std::endl;
       if (g_last_state != g_state)
       {
         std::cout << "Falling into stop state" << std::endl;
@@ -283,61 +431,64 @@ int main(int argc, char **argv) {
       break;
 
     case STATE_POSE_FOLLOW: // POSE_FOLLOW
-      //std::cout << "Inside state pose follow" << std::endl;
       /* --- BEGIN STATE POSE FOLLOWING --- */
       //first time to move, send zero velocity command
       if (g_last_state != g_state)
       {
-        Kp_elastic = 0.0;
-        Ko_elastic = 0.0;
         std::cout << "STATE change to pose following, start to send first zero velocity" << std::endl;
-        for (unsigned int joint = 0; joint < NUMBER_OF_JOINT; joint++) {
-        point.positions.at(joint) = g_current_joints.position.at(joint);
-        point.velocities.at(joint) = 0;
-        } 
-        // point.time_from_start = ros::Duration(0.0);
-        point.time_from_start = ros::Time::now() - g_t_start;
-        dummy_traj.points.at(0) = point;
-        dummy_traj.header.stamp = ros::Time::now();
-        streaming_pub.publish(dummy_traj);
+        std::cout << "Accept point and state from publisher" << std::endl;
 
-        g_t_last = ros::Time::now();
+        // for (unsigned int joint = 0; joint < NUMBER_OF_JOINT; joint++) {
+        // point.positions.at(joint) = g_current_joints.position.at(joint);
+        // point.velocities.at(joint) = 0;
+        // } 
+        // point.time_from_start = ros::Time::now() - g_t_start;
+        // std::cout << "[FOLLOW] time_from_start: " << point.time_from_start << std::endl;
+        // dummy_traj.points.at(0) = point;
+        // dummy_traj.header.stamp = ros::Time::now();
+        // streaming_pub.publish(dummy_traj);
+        // std::cout << "Send init zero-vel point at time: " << ros::Time::now();
+        // g_t_last = ros::Time::now();
         g_last_state = g_state;
+        g_pose = g_pose_init;
         continue;
       }
-      double dt_cb = (ros::Time::now() - g_t_last_cb).toSec();
-      if (dt_cb > dt_pose_lim) {
-        ROS_DEBUG_NAMED("stream_dbg", "dt_cb: %1.3f", dt_cb);
-        g_state = STATE_IDLE;
-        ROS_DEBUG_NAMED("state", "STATE_POSE_FOLLOW --> STATE_IDLE");
-        ROS_DEBUG_NAMED("event", "Event: dt_cb > dt_pose_lim");\
-        continue; // pass all computing and send command below
-      } 
+      // double dt_cb = (ros::Time::now() - g_t_last_cb).toSec();
+      // if (dt_cb > dt_pose_lim) {
+      //   ROS_DEBUG_NAMED("stream_dbg", "dt_cb: %1.3f", dt_cb);
+      //   g_state = STATE_IDLE;
+      //   ROS_DEBUG_NAMED("state", "STATE_POSE_FOLLOW --> STATE_IDLE");
+      //   ROS_DEBUG_NAMED("event", "Event: dt_cb > dt_pose_lim");\
+      //   continue; // pass all computing and send command below
+      // } 
       // Time since last point:
-      // ros::topic::waitForMessage<sensor_msgs::JointState>("joint_states");
       dt = (ros::Time::now() - g_t_last).toSec();
       g_t_last = ros::Time::now();
       kinematic_state.setVariableValues(g_current_joints);
+      std::cout << "[DEBUG][FOLLOW] joint state update:" << g_current_joints.position[0] << ";"
+                                                       << g_current_joints.position[1] << ";"
+                                                       << g_current_joints.position[2] << ";"
+                                                       << g_current_joints.position[3] << ";"
+                                                       << g_current_joints.position[4] << ";"
+                                                       << g_current_joints.position[5] << ";"
+                                                       << std::endl;
       
       Eigen::Affine3d end_effector_state = kinematic_state.getGlobalLinkTransform("tool0");
       Eigen::Matrix4d homo_mat = end_effector_state.matrix();
       
       // Get the Jacobian
-      kinematic_state.getJacobian(
-          joint_model_group_p,
-          kinematic_state.getLinkModel(
-              joint_model_group_p->getLinkModelNames().back()),
-          ref_point, J);
+      kinematic_state.getJacobian(joint_model_group_p,kinematic_state.getLinkModel(joint_model_group_p->getLinkModelNames().back()), ref_point, J);
       
       //e_p = p_destination - p_end_effector
       e_p(0,0) = g_pose.pose.position.x - homo_mat(0,3);
       e_p(1,0) = g_pose.pose.position.y - homo_mat(1,3);
       e_p(2,0) = g_pose.pose.position.z - homo_mat(2,3);
+      std::cout << "Debug error in position: e_x=" <<  e_p(0,0) << " e_y=" << e_p(1,0) << " e_z=" << e_p(2,0) << std::endl;
       Eigen::Matrix3d endEffect_rotateMat = homo_mat.block<3,3>(0,0);
 
-      auto roll_d = g_pose.pose.orientation.x;
-      auto pitch_d = g_pose.pose.orientation.y;
-      auto yaw_d = g_pose.pose.orientation.z;
+      auto roll_d = 179.0;
+      auto pitch_d = 0.1;
+      auto yaw_d = 0.1;
       //qxd qyd qzd giờ đây đã không còn là quaternion mà đang dùng dưới danh nghĩa roll-pitch-yaw
       Eigen::Matrix3d des_rotateMat;
       des_rotateMat = Eigen::AngleAxisd((roll_d) * M_PI / 180, Eigen::Vector3d::UnitX())
@@ -500,9 +651,28 @@ bool cb_start_pose_following(
     manipulator_pose_following::ReplyInt::Response &res) {
 
   std::cout << "/pose_following/start signal received." << std::endl;
-  g_state = STATE_POSE_FOLLOW;
+  g_state = STATE_IDLE;
   res.reply = 1;
   return true;
+}
+
+bool cb_init_point_accept(
+  manipulator_pose_following::InitPoint::Request &req, 
+  manipulator_pose_following::InitPoint::Response &res) {
+    if (g_state == STATE_IDLE)
+    {
+      g_state = STATE_INIT;
+      g_t_start = ros::Time::now();
+    }
+    g_pose_init.pose.position.x = req.x;
+    g_pose_init.pose.position.y = req.y;
+    g_pose_init.pose.position.z = req.z;
+    
+    if (g_is_init_done == true)
+    {
+      res.transfer_state = 10;
+    }
+    return true;
 }
 
 bool cb_stop_pose_following(
@@ -517,17 +687,22 @@ bool cb_stop_pose_following(
   return true;
 }
 
-void cb_pose_quat(const geometry_msgs::PoseStamped::ConstPtr &msg) {
+void cb_pose_quat(const manipulator_pose_following::PlannedPath::ConstPtr &msg) {
 
-  if (g_state == STATE_IDLE) {
-    g_state = STATE_POSE_FOLLOW;
-    ROS_DEBUG_NAMED("state", "STATE_IDLE --> STATE_POSE_FOLLOW");
-    ROS_DEBUG_NAMED("event", "Event: received msg on topic /pose");
-    // g_t_start = ros::Time::now(); // may be i should uncomment this for setting t_start
-  }
+  // if (g_state == STATE_IDLE) {
+  //   g_state = STATE_POSE_FOLLOW;
+  //   ROS_DEBUG_NAMED("state", "STATE_IDLE --> STATE_POSE_FOLLOW");
+  //   ROS_DEBUG_NAMED("event", "Event: received msg on topic /pose");
+  //   g_t_start = ros::Time::now();
+  // }
 
   g_t_last_cb = ros::Time::now();
-  g_pose = *msg;
+  g_pose.pose.position.x = msg->x;
+  g_pose.pose.position.y = msg->y;
+  g_pose.pose.position.z = msg->z;
+  g_pose.pose.orientation.x = 180.0;
+  g_pose.pose.orientation.y = 0.1;
+  g_pose.pose.orientation.z = 0.1;
 }
 
 void uModify_JacobianParameter(float &Kp, float &Ko, double &w0, double &k0, float &Kdp, float &Kdo)
@@ -618,4 +793,19 @@ void uModify_JacobianParameter(float &Kp, float &Ko, double &w0, double &k0, flo
   }
   
   return;
+}
+
+void handleIdleState(trajectory_msgs::JointTrajectoryPoint &point)
+{
+  if (g_last_state != g_state)
+  {
+    g_last_state = g_state; // update last state = this state if spot the diff
+    std::cout << "Falling into idle state" << std::endl;
+  } 
+  // --- Keep track of the joint state (positions)
+  for (unsigned int joint = 0; joint < NUMBER_OF_JOINT; joint++) {
+    point.positions.at(joint) = g_current_joints.position.at(joint);
+    point.velocities.at(joint) = 0;
+  }
+  point.time_from_start = ros::Duration(0.0);
 }
