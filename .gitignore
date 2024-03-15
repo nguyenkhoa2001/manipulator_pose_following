@@ -8,3 +8,8 @@
 ######################
 logs/
 .log
+
+#ros_bag record
+backup_path_planning_data/
+new_data.txt
+*.bag
