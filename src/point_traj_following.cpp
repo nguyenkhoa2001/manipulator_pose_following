@@ -527,6 +527,7 @@ int main(int argc, char **argv) {
       w = pow((J * J.transpose()).determinant(), 0.5);
       Eigen::MatrixXd sr_inv_J = calc_sr_inverse(J, w, w0, k0);
       theta_d = sr_inv_J  * (p_and_o_quat_vel);
+      std::cout << "Velocity for moving robot in following mode: " << theta_d << std::endl;
       //theta_d = calc_p_inverse(J)  * (p_and_o_quat_vel);
 
       // check condition number:
@@ -556,6 +557,7 @@ int main(int argc, char **argv) {
         for (unsigned int j = 0; j < NUMBER_OF_JOINT; j++)
         {
           point.velocities.at(j) = 0;
+          std::cout << "Help Me Cuu tui Cuu tui" << std::endl;
         }
       }
       point.time_from_start = ros::Time::now() - g_t_start;

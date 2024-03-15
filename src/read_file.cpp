@@ -1,10 +1,16 @@
 //ROS include file
 #define NODE_LOOP_RATE      40
+#define MAX_BUFFER_TO_BE_SENT 100
 
+#define SIZE_DATA_POINT 5
+// Data point to be sent -- Field index
 #define POSITION_X_INDEX 0
 #define POSITION_Y_INDEX 1
 #define POSITION_Z_INDEX 2
 #define DELTA_T_INDEX 3
+#define VEL_CAL_INDEX 4
+
+
 
 #include <ros/ros.h>
 #include <ros/console.h>
@@ -22,6 +28,7 @@
 #include <cstdint>
 #include <boost/circular_buffer.hpp>
 
+
 // ==== IO Functions Declaration Section  ====
 void extractNextDataLine(std::ifstream& data_file, std::vector<double> & result_data_point);
 bool publishSubPoint(const std::vector<std::vector<double>> *sub_point_list, ros::Publisher &publish_handler, ros::Rate &loop_rate);
@@ -31,7 +38,7 @@ void calcSubDataPoint(const std::vector<double>& previous_data_point, const std:
 
 double g_loop_interval = 1.0/NODE_LOOP_RATE;
 uint8_t g_track_init_state = 0;
-std::vector<double> g_pre_data_point{0.0, 0.0, 0.0, 0.0};
+std::vector<double> g_pre_data_point{0.0, 0.0, 0.0, 0.0, 0.0}; // This vector size must match with data point size
 
 int main(int argc, char** argv)
 {
@@ -45,12 +52,13 @@ int main(int argc, char** argv)
     manipulator_pose_following::InitPoint init_reply_message;
 
     //Publisher
-    ros::Publisher desired_position_pub = nh.advertise<manipulator_pose_following::PlannedPath>("/user_defined/desired_path_point", 100);
+    ros::Publisher desired_position_pub = nh.advertise<manipulator_pose_following::PlannedPath>("/user_defined/desired_path_point", MAX_BUFFER_TO_BE_SENT);
 
     // Data file section
-    std::ifstream data_file("/home/khoa/catkin_ws/src/manipulator_pose_following/data.txt");
+    std::ifstream data_file("/home/khoa/catkin_ws/src/manipulator_pose_following/new_data.txt");
     std::cout << "Set up done for node's communication !" << std::endl;
 
+    // Counting variable , after a successful reading line, increased this by 1
     int data_line_counter = 0;
     
     ros::Rate loop_rate(NODE_LOOP_RATE);
@@ -66,6 +74,7 @@ int main(int argc, char** argv)
             last_point.y = g_pre_data_point[POSITION_Y_INDEX];
             last_point.z = g_pre_data_point[POSITION_Z_INDEX] + 0.05;
             last_point.delta_time = g_pre_data_point[DELTA_T_INDEX];
+            last_point.calc_vel = g_pre_data_point[VEL_CAL_INDEX];
             desired_position_pub.publish(last_point);
             loop_rate.sleep();
             continue;
@@ -149,6 +158,7 @@ bool publishSubPoint(const std::vector<std::vector<double>> *sub_point_list, ros
         sub_point_msg.y = sub_point[POSITION_Y_INDEX];
         sub_point_msg.z = sub_point[POSITION_Z_INDEX] + 0.05;
         sub_point_msg.delta_time = sub_point[DELTA_T_INDEX];
+        sub_point_msg.calc_vel = sub_point[VEL_CAL_INDEX];
         publish_handler.publish(sub_point_msg);
         std::cout << "\t sp[" << i << "] x=" << sub_point[POSITION_X_INDEX] 
                     << "\t y=" << sub_point[POSITION_Y_INDEX] 
@@ -165,6 +175,11 @@ void calcSubDataPoint(const std::vector<double>& previous_data_point, const std:
     // For example: dt = 0.3s and NODE_LOOP_RATE = 60HZ => sperate 2 point into 0.3/(1/60) = 18 points
     double dt = current_data_point[DELTA_T_INDEX];
     int number_of_points = floor(dt / g_loop_interval);
+    double linear_velocity = std::sqrt(
+        std::pow(current_data_point[POSITION_X_INDEX] - previous_data_point[POSITION_X_INDEX], 2) +
+        std::pow(current_data_point[POSITION_Y_INDEX] - previous_data_point[POSITION_Y_INDEX], 2) +
+        std::pow(current_data_point[POSITION_Z_INDEX] - previous_data_point[POSITION_Z_INDEX], 2)
+    ) / dt;
     // Sliding 2 points into `number_of_points` subpoints
     double position_x_step = (current_data_point[POSITION_X_INDEX] - previous_data_point[POSITION_X_INDEX]) / (number_of_points - 1);
     double position_y_step = (current_data_point[POSITION_Y_INDEX] - previous_data_point[POSITION_Y_INDEX]) / (number_of_points - 1);
@@ -172,11 +187,12 @@ void calcSubDataPoint(const std::vector<double>& previous_data_point, const std:
     sub_point_list = new std::vector<std::vector<double>>(number_of_points);
     for (size_t i = 0; i < number_of_points; i++)
     {
-        std::vector<double> sub_point(4); //size of 4
+        std::vector<double> sub_point(SIZE_DATA_POINT); //size of 4
         sub_point[POSITION_X_INDEX] = previous_data_point[POSITION_X_INDEX] + position_x_step * i;
         sub_point[POSITION_Y_INDEX] = previous_data_point[POSITION_Y_INDEX] + position_y_step * i;
         sub_point[POSITION_Z_INDEX] = previous_data_point[POSITION_Z_INDEX] + position_z_step * i;
         sub_point[DELTA_T_INDEX] = dt;
+        sub_point[VEL_CAL_INDEX] = linear_velocity;
         sub_point_list->at(i) = sub_point;
     }
     // for (size_t i = 0; i < number_of_points; i++)
