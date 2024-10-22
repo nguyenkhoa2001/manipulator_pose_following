@@ -337,7 +337,7 @@ int main(int argc, char **argv) {
 
       auto roll_d = 179.0;
       auto pitch_d = 0.1;
-      auto yaw_d = 0.1;
+      auto yaw_d = 90.1;
       //qxd qyd qzd giờ đây đã không còn là quaternion mà đang dùng dưới danh nghĩa roll-pitch-yaw
       Eigen::Matrix3d des_rotateMat;
       des_rotateMat = Eigen::AngleAxisd((roll_d) * M_PI / 180, Eigen::Vector3d::UnitX())
@@ -488,7 +488,7 @@ int main(int argc, char **argv) {
 
       auto roll_d = 179.0;
       auto pitch_d = 0.1;
-      auto yaw_d = 0.1;
+      auto yaw_d = 90.1;
       //qxd qyd qzd giờ đây đã không còn là quaternion mà đang dùng dưới danh nghĩa roll-pitch-yaw
       Eigen::Matrix3d des_rotateMat;
       des_rotateMat = Eigen::AngleAxisd((roll_d) * M_PI / 180, Eigen::Vector3d::UnitX())

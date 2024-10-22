@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <boost/circular_buffer.hpp>
 
+#define Z_INCREASEMENT 0.1
 
 // ==== IO Functions Declaration Section  ====
 void extractNextDataLine(std::ifstream& data_file, std::vector<double> & result_data_point);
@@ -72,7 +73,7 @@ int main(int argc, char** argv)
             manipulator_pose_following::PlannedPath last_point;
             last_point.x = g_pre_data_point[POSITION_X_INDEX];
             last_point.y = g_pre_data_point[POSITION_Y_INDEX];
-            last_point.z = g_pre_data_point[POSITION_Z_INDEX] + 0.05;
+            last_point.z = g_pre_data_point[POSITION_Z_INDEX] + Z_INCREASEMENT;
             last_point.delta_time = g_pre_data_point[DELTA_T_INDEX];
             last_point.calc_vel = g_pre_data_point[VEL_CAL_INDEX];
             desired_position_pub.publish(last_point);
@@ -95,7 +96,7 @@ int main(int argc, char** argv)
             std::cout << "Doing call to init point service" << std::endl;
             init_reply_message.request.x = g_pre_data_point[POSITION_X_INDEX];
             init_reply_message.request.y = g_pre_data_point[POSITION_Y_INDEX];
-            init_reply_message.request.z = g_pre_data_point[POSITION_Z_INDEX] + 0.05;
+            init_reply_message.request.z = g_pre_data_point[POSITION_Z_INDEX] + Z_INCREASEMENT;
             init_handle_client.call(init_reply_message);
             ros::Duration(1.0).sleep();
             if(init_reply_message.response.transfer_state != 10) continue;
@@ -156,7 +157,7 @@ bool publishSubPoint(const std::vector<std::vector<double>> *sub_point_list, ros
         manipulator_pose_following::PlannedPath sub_point_msg;
         sub_point_msg.x = sub_point[POSITION_X_INDEX];
         sub_point_msg.y = sub_point[POSITION_Y_INDEX];
-        sub_point_msg.z = sub_point[POSITION_Z_INDEX] + 0.05;
+        sub_point_msg.z = sub_point[POSITION_Z_INDEX] + Z_INCREASEMENT;
         sub_point_msg.delta_time = sub_point[DELTA_T_INDEX];
         sub_point_msg.calc_vel = sub_point[VEL_CAL_INDEX];
         publish_handler.publish(sub_point_msg);
